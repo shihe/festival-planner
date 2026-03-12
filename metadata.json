@@ -1,0 +1,5 @@
+{
+  "name": "FestSync: AI Festival Optimizer",
+  "description": "Convert festival schedule images into interactive daily planners. Vote with friends and let AI resolve conflicts to create the ultimate group schedule.",
+  "requestFramePermissions": []
+}
