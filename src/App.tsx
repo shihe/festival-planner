@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Upload, Calendar, Users, Sparkles, Trash2, ChevronRight, ChevronLeft, Plus, Share2, Copy, Check } from 'lucide-react';
+import { Upload, Calendar, Users, Sparkles, Trash2, ChevronRight, ChevronLeft, Plus, Share2, Copy, Check, Palette } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import LZString from 'lz-string';
 import { extractScheduleFromImage, optimizeSchedule, Act, Vote, OptimizationStrategy } from './services/geminiService';
@@ -65,6 +65,7 @@ export default function App() {
   const [strategy, setStrategy] = useState<OptimizationStrategy>('default');
   const [showStrategyDropdown, setShowStrategyDropdown] = useState(false);
   const [showOnlyOptimal, setShowOnlyOptimal] = useState(false);
+  const [showGradients, setShowGradients] = useState(true);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   
@@ -313,6 +314,28 @@ export default function App() {
 
   const getVotesForAct = (actId: string) => {
     return festival?.votes.filter(v => v.act_id === actId) || [];
+  };
+
+  const getActBackgroundStyle = (votes: Vote[], isOptimal: boolean) => {
+    if (!showGradients || votes.length === 0) {
+      return {};
+    }
+    
+    const colors = votes.map(v => getUserById(v.user_id)?.color).filter(Boolean) as string[];
+    if (colors.length === 0) return {};
+    
+    const opacity = isOptimal ? '40' : '20'; // Hex opacity: 20 is ~12%, 40 is ~25%
+    
+    if (colors.length === 1) {
+      return { backgroundColor: `${colors[0]}${opacity}` };
+    }
+    
+    const stops = colors.map((color, i) => {
+      const percentage = (i / (colors.length - 1)) * 100;
+      return `${color}${opacity} ${percentage}%`;
+    });
+    
+    return { background: `linear-gradient(135deg, ${stops.join(', ')})` };
   };
 
   const getUserById = (id: string) => {
@@ -618,20 +641,34 @@ export default function App() {
             </label>
           </div>
 
-          {optimalActIds.length > 0 && (
+          <div className="flex items-center gap-2">
             <button 
-              onClick={() => setShowOnlyOptimal(!showOnlyOptimal)}
+              onClick={() => setShowGradients(!showGradients)}
               className={cn(
                 "flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-mono uppercase tracking-widest transition-all border shrink-0",
-                showOnlyOptimal 
-                  ? "bg-emerald-500 text-white border-emerald-500" 
+                showGradients 
+                  ? "bg-[#141414] text-white border-[#141414]" 
                   : "bg-white border-[#141414]/10 text-[#141414]/60 hover:bg-[#141414]/5"
               )}
             >
-              <Sparkles size={14} />
-              <span>{showOnlyOptimal ? 'Showing Optimized Run' : 'Hide Unhighlighted Acts'}</span>
+              <Palette size={14} />
+              <span className="hidden sm:inline">{showGradients ? 'Gradients On' : 'Gradients Off'}</span>
             </button>
-          )}
+            {optimalActIds.length > 0 && (
+              <button 
+                onClick={() => setShowOnlyOptimal(!showOnlyOptimal)}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-mono uppercase tracking-widest transition-all border shrink-0",
+                  showOnlyOptimal 
+                    ? "bg-emerald-500 text-white border-emerald-500" 
+                    : "bg-white border-[#141414]/10 text-[#141414]/60 hover:bg-[#141414]/5"
+                )}
+              >
+                <Sparkles size={14} />
+                <span>{showOnlyOptimal ? 'Showing Optimized Run' : 'Hide Unhighlighted Acts'}</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Schedule Grid */}
@@ -656,10 +693,15 @@ export default function App() {
                       onClick={() => toggleVote(act.id)}
                       className={cn(
                         "group relative p-4 rounded-2xl border transition-all cursor-pointer",
-                        isOptimal 
-                          ? "bg-[#141414] text-white border-[#141414] shadow-xl scale-[1.02]" 
-                          : "bg-white border-[#141414]/5 hover:border-[#141414]/20"
+                        isOptimal ? "shadow-xl scale-[1.02]" : "",
+                        !showGradients && isOptimal ? "bg-[#141414] text-white border-[#141414]" : "",
+                        !showGradients && !isOptimal ? "bg-white border-[#141414]/5 hover:border-[#141414]/20" : "",
+                        showGradients ? "text-[#141414]" : "",
+                        showGradients && isOptimal ? "border-[#141414] border-2" : "",
+                        showGradients && !isOptimal ? "border-[#141414]/5 hover:border-[#141414]/20" : "",
+                        showGradients && votes.length === 0 ? "bg-white" : ""
                       )}
+                      style={getActBackgroundStyle(votes, isOptimal)}
                     >
                       {isOptimal && (
                         <div className="absolute -top-2 -right-2 bg-emerald-500 text-white p-1 rounded-full shadow-lg">
@@ -670,7 +712,7 @@ export default function App() {
                       <div className="flex justify-between items-start mb-2">
                         <span className={cn(
                           "text-[10px] font-mono uppercase tracking-tighter",
-                          isOptimal ? "text-white/60" : "text-[#141414]/40"
+                          (!showGradients && isOptimal) ? "text-white/60" : "text-[#141414]/60"
                         )}>
                           {act.startTime} — {act.endTime}
                         </span>
@@ -698,7 +740,7 @@ export default function App() {
                               key={idx} 
                               className={cn(
                                 "text-[8px] font-mono uppercase px-1.5 py-0.5 rounded-sm",
-                                isOptimal ? "bg-white/10 text-white/60" : "bg-[#141414]/5 text-[#141414]/40"
+                                (!showGradients && isOptimal) ? "bg-white/10 text-white/60" : "bg-[#141414]/5 text-[#141414]/60"
                               )}
                             >
                               {genre}
@@ -709,14 +751,14 @@ export default function App() {
                       
                       <div className="flex items-center justify-between mt-3">
                         <div className="flex items-center gap-1">
-                          <Users size={10} className={isOptimal ? "text-white/40" : "text-[#141414]/20"} />
-                          <span className={cn("text-[10px] font-mono", isOptimal ? "text-white/40" : "text-[#141414]/40")}>
+                          <Users size={10} className={(!showGradients && isOptimal) ? "text-white/40" : "text-[#141414]/40"} />
+                          <span className={cn("text-[10px] font-mono", (!showGradients && isOptimal) ? "text-white/40" : "text-[#141414]/60")}>
                             {votes.length} Votes
                           </span>
                         </div>
                         {hasVoted && (
                           <div className="flex items-center gap-1">
-                            <span className={cn("text-[8px] font-mono uppercase", isOptimal ? "text-white/40" : "text-[#141414]/40")}>You</span>
+                            <span className={cn("text-[8px] font-mono uppercase", (!showGradients && isOptimal) ? "text-white/40" : "text-[#141414]/60")}>You</span>
                             <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: userColor }} />
                           </div>
                         )}
