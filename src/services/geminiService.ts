@@ -64,7 +64,7 @@ export const extractScheduleFromImage = async (base64Image: string): Promise<{ f
 export const optimizeSchedule = async (acts: Act[], votes: (Vote & { color: string })[]): Promise<string[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const model = ai.models.generateContent({
-    model: "gemini-3.1-pro-preview",
+    model: "gemini-3-flash-preview",
     contents: `
       Given a list of music festival acts and group votes, generate an optimal schedule.
       The goal is to maximize the number of acts the group can see together, prioritizing acts with more votes.
