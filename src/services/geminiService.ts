@@ -7,6 +7,7 @@ export interface Act {
   day: string;
   startTime: string;
   endTime: string;
+  genres?: string[];
 }
 
 export interface Vote {
@@ -27,7 +28,7 @@ export const extractScheduleFromImage = async (base64Image: string): Promise<{ f
         },
       },
       {
-        text: "Extract the music festival schedule from this image. The image typically shows stages as columns and time on a vertical axis. Return a JSON object with 'festivalName' and an array 'acts'. Each act should have 'id' (unique string), 'name', 'stage', 'day', 'startTime' (24h format HH:mm), and 'endTime' (24h format HH:mm). Note that times starting from 1:00 are usually PM (13:00) and can go past midnight (00:00, 01:00, etc.). If an end time is not explicitly listed, estimate it based on the act's vertical size or assume a 50-minute set. If the image is not a schedule, return an empty array of acts.",
+        text: "Extract the music festival schedule from this image. The image typically shows stages as columns and time on a vertical axis. Return a JSON object with 'festivalName' and an array 'acts'. Each act should have 'id' (unique string), 'name', 'stage', 'day', 'startTime' (24h format HH:mm), 'endTime' (24h format HH:mm), and 'genres' (an array of 1-3 genres the artist is known for). Note that times starting from 1:00 are usually PM (13:00) and can go past midnight (00:00, 01:00, etc.). If an end time is not explicitly listed, estimate it based on the act's vertical size or assume a 50-minute set. If the image is not a schedule, return an empty array of acts.",
       },
     ],
     config: {
@@ -47,8 +48,13 @@ export const extractScheduleFromImage = async (base64Image: string): Promise<{ f
                 day: { type: Type.STRING },
                 startTime: { type: Type.STRING },
                 endTime: { type: Type.STRING },
+                genres: {
+                  type: Type.ARRAY,
+                  items: { type: Type.STRING },
+                  description: "1-3 genres the artist is known for",
+                },
               },
-              required: ["id", "name", "stage", "day", "startTime", "endTime"],
+              required: ["id", "name", "stage", "day", "startTime", "endTime", "genres"],
             },
           },
         },

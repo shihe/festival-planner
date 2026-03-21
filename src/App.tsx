@@ -35,6 +35,7 @@ export default function App() {
   const [festival, setFestival] = useState<FestivalData | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingMessage, setProcessingMessage] = useState("EXTRACTING SCHEDULE...");
+  const [progress, setProgress] = useState(0);
   const [userId, setUserId] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('s')) {
@@ -65,7 +66,10 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   
   useEffect(() => {
-    if (!isProcessing) return;
+    if (!isProcessing) {
+      setProgress(0);
+      return;
+    }
     const messages = [
       "EXTRACTING SCHEDULE...",
       "IDENTIFYING STAGES...",
@@ -78,7 +82,18 @@ export default function App() {
       setProcessingMessage(messages[i % messages.length]);
       i++;
     }, 2000);
-    return () => clearInterval(interval);
+
+    const progressInterval = setInterval(() => {
+      setProgress(prev => {
+        if (prev >= 95) return prev;
+        return prev + Math.random() * 5;
+      });
+    }, 500);
+
+    return () => {
+      clearInterval(interval);
+      clearInterval(progressInterval);
+    };
   }, [isProcessing]);
 
   // --- State Encoding ---
@@ -142,38 +157,65 @@ export default function App() {
 
   // --- Handlers ---
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
     setIsProcessing(true);
     try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const base64 = event.target?.result as string;
-        const result = await extractScheduleFromImage(base64);
-        
-        const festivalId = Math.random().toString(36).substring(7);
-        const newFestival: FestivalData = {
-          id: festivalId,
-          name: result.festivalName,
-          acts: result.acts,
-          votes: [],
-          users: userName ? [{ user_id: userId, name: userName, color: userColor }] : [],
-        };
+      const allNewActs: Act[] = [];
+      let detectedFestivalName = festival?.name || "";
 
-        setFestival(newFestival);
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (event) => resolve(event.target?.result as string);
+          reader.readAsDataURL(file);
+        });
+
+        const result = await extractScheduleFromImage(base64);
         if (result.acts.length > 0) {
-          setSelectedDay(result.acts[0].day);
+          allNewActs.push(...result.acts);
+          if (!detectedFestivalName) detectedFestivalName = result.festivalName;
         }
-        
-        if (!userName) {
-          setIsJoining(true);
+      }
+
+      if (allNewActs.length === 0) {
+        alert("No acts found in the uploaded images.");
+        return;
+      }
+
+      setFestival(prev => {
+        if (prev) {
+          // Merge acts, avoiding duplicates by ID
+          const existingIds = new Set(prev.acts.map(a => a.id));
+          const filteredNewActs = allNewActs.filter(a => !existingIds.has(a.id));
+          return {
+            ...prev,
+            acts: [...prev.acts, ...filteredNewActs]
+          };
+        } else {
+          const festivalId = Math.random().toString(36).substring(7);
+          return {
+            id: festivalId,
+            name: detectedFestivalName || "My Festival",
+            acts: allNewActs,
+            votes: [],
+            users: userName ? [{ user_id: userId, name: userName, color: userColor }] : [],
+          };
         }
-      };
-      reader.readAsDataURL(file);
+      });
+
+      if (allNewActs.length > 0 && !selectedDay) {
+        setSelectedDay(allNewActs[0].day);
+      }
+      
+      if (!userName && !festival) {
+        setIsJoining(true);
+      }
     } catch (err) {
       console.error(err);
-      alert("Failed to process image. Make sure it's a clear schedule.");
+      alert("Failed to process images. Make sure they are clear schedules.");
     } finally {
       setIsProcessing(false);
     }
@@ -257,14 +299,24 @@ export default function App() {
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-[#E4E3E0]/90 backdrop-blur-xl"
           >
-            <div className="text-center space-y-6">
+            <div className="text-center space-y-6 w-full max-w-xs">
               <div className="relative">
                 <div className="w-24 h-24 border-4 border-[#141414]/10 rounded-full mx-auto" />
                 <div className="absolute inset-0 w-24 h-24 border-4 border-[#141414] border-t-transparent rounded-full animate-spin mx-auto" />
               </div>
-              <div className="space-y-2">
-                <p className="text-2xl font-serif italic animate-pulse">{processingMessage}</p>
-                <p className="text-[10px] font-mono uppercase opacity-40 tracking-widest">AI is analyzing your schedule</p>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <p className="text-2xl font-serif italic animate-pulse">{processingMessage}</p>
+                  <p className="text-[10px] font-mono uppercase opacity-40 tracking-widest">AI is analyzing your schedule</p>
+                </div>
+                <div className="w-full h-1 bg-[#141414]/10 rounded-full overflow-hidden">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${progress}%` }}
+                    className="h-full bg-[#141414]"
+                  />
+                </div>
+                <p className="text-[8px] font-mono opacity-40 uppercase tracking-widest">{Math.round(progress)}% COMPLETE</p>
               </div>
             </div>
           </motion.div>
@@ -290,7 +342,7 @@ export default function App() {
                   <p className="mb-2 text-lg font-medium text-[#141414]">Upload Schedule Image</p>
                   <p className="text-xs text-[#141414]/40 font-mono">PNG, JPG or WEBP</p>
                 </div>
-                <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={isProcessing} />
+                <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={isProcessing} multiple />
               </label>
             </div>
 
@@ -466,19 +518,29 @@ export default function App() {
         </div>
 
         {/* Day Selector */}
-        <div className="flex gap-2 overflow-x-auto pb-2 no-scrollbar">
-          {days.map(day => (
-            <button
-              key={day}
-              onClick={() => setSelectedDay(day)}
-              className={cn(
-                "px-6 py-2 rounded-full text-xs font-mono uppercase tracking-widest transition-all border border-[#141414]/10 whitespace-nowrap",
-                selectedDay === day ? "bg-[#141414] text-white" : "bg-white/50 hover:bg-white"
-              )}
-            >
-              {day}
-            </button>
-          ))}
+        <div className="flex items-center gap-4 overflow-x-auto pb-2 no-scrollbar">
+          <div className="flex gap-2">
+            {days.map(day => (
+              <button
+                key={day}
+                onClick={() => setSelectedDay(day)}
+                className={cn(
+                  "px-6 py-2 rounded-full text-xs font-mono uppercase tracking-widest transition-all border border-[#141414]/10 whitespace-nowrap",
+                  selectedDay === day ? "bg-[#141414] text-white" : "bg-white/50 hover:bg-white"
+                )}
+              >
+                {day}
+              </button>
+            ))}
+          </div>
+          
+          <label className="shrink-0 cursor-pointer group">
+            <div className="flex items-center gap-2 px-4 py-2 rounded-full border border-dashed border-[#141414]/20 hover:border-[#141414] transition-all bg-white/30">
+              <Plus size={14} className="text-[#141414]/40 group-hover:text-[#141414]" />
+              <span className="text-[10px] font-mono uppercase tracking-widest text-[#141414]/40 group-hover:text-[#141414]">Add Day</span>
+            </div>
+            <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={isProcessing} multiple />
+          </label>
         </div>
 
         {/* Schedule Grid */}
@@ -537,6 +599,22 @@ export default function App() {
                       </div>
 
                       <h4 className="font-medium text-sm mb-1 leading-tight">{act.name}</h4>
+                      
+                      {act.genres && act.genres.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-1">
+                          {act.genres.map((genre, idx) => (
+                            <span 
+                              key={idx} 
+                              className={cn(
+                                "text-[8px] font-mono uppercase px-1.5 py-0.5 rounded-sm",
+                                isOptimal ? "bg-white/10 text-white/60" : "bg-[#141414]/5 text-[#141414]/40"
+                              )}
+                            >
+                              {genre}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                       
                       <div className="flex items-center justify-between mt-3">
                         <div className="flex items-center gap-1">
