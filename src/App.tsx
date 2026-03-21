@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Upload, Calendar, Users, Sparkles, Trash2, ChevronRight, ChevronLeft, Plus, Share2, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import LZString from 'lz-string';
@@ -276,11 +276,35 @@ export default function App() {
   };
 
   // --- Helpers ---
-  const days = Array.from(new Set(festival?.acts.map(a => a.day) || [])) as string[];
-  const stages = Array.from(new Set(festival?.acts.map(a => a.stage) || [])) as string[];
+  const days = useMemo(() => {
+    return Array.from(new Set(festival?.acts.map(a => a.day) || [])) as string[];
+  }, [festival]);
+
+  const stages = useMemo(() => {
+    if (!festival || !selectedDay) return [];
+    
+    // Get all acts for the selected day
+    let dayActs = festival.acts.filter(a => a.day === selectedDay);
+
+    // If showing only optimal, filter acts first
+    if (showOnlyOptimal && optimalActIds.length > 0) {
+      dayActs = dayActs.filter(a => optimalActIds.includes(a.id));
+    }
+    
+    // Group by lower case to merge case-insensitively
+    const stageMap = new Map<string, string>();
+    dayActs.forEach(act => {
+      const lower = act.stage.toLowerCase();
+      if (!stageMap.has(lower)) {
+        stageMap.set(lower, act.stage); // Keep the first casing encountered
+      }
+    });
+    
+    return Array.from(stageMap.values());
+  }, [festival, selectedDay, showOnlyOptimal, optimalActIds]);
   
   const getActsForDayAndStage = (day: string, stage: string) => {
-    let acts = festival?.acts.filter(a => a.day === day && a.stage === stage) || [];
+    let acts = festival?.acts.filter(a => a.day === day && a.stage.toLowerCase() === stage.toLowerCase()) || [];
     if (showOnlyOptimal && optimalActIds.length > 0) {
       acts = acts.filter(a => optimalActIds.includes(a.id));
     }
