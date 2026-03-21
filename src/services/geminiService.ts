@@ -67,13 +67,25 @@ export const extractScheduleFromImage = async (base64Image: string): Promise<{ f
   return JSON.parse(response.text);
 };
 
-export const optimizeSchedule = async (acts: Act[], votes: (Vote & { color: string })[]): Promise<string[]> => {
+export type OptimizationStrategy = 'default' | 'quantity' | 'consensus' | 'variety';
+
+export const optimizeSchedule = async (acts: Act[], votes: (Vote & { color: string })[], strategy: OptimizationStrategy = 'default'): Promise<string[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  
+  let strategyPrompt = "The goal is to maximize the number of acts the group can see together, prioritizing acts with more votes.";
+  if (strategy === 'quantity') {
+    strategyPrompt = "Maximize the total number of acts that can be seen within the day. Resolve overlaps by picking shorter sets or more frequent transitions to fit as many unique artists as possible into the schedule.";
+  } else if (strategy === 'consensus') {
+    strategyPrompt = "Maximize seeing the acts with the most consensus (acts where the highest percentage of the group voted for them).";
+  } else if (strategy === 'variety') {
+    strategyPrompt = "Maximize the acts that collectively create the most varied range in music genres. Use your knowledge of the artists to determine their genres.";
+  }
+
   const model = ai.models.generateContent({
     model: "gemini-3-flash-preview",
     contents: `
       Given a list of music festival acts and group votes, generate an optimal schedule.
-      The goal is to maximize the number of acts the group can see together, prioritizing acts with more votes.
+      ${strategyPrompt}
       Assume the group can only be at one act at a time.
       
       Acts: ${JSON.stringify(acts)}

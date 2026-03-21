@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Calendar, Users, Sparkles, Trash2, ChevronRight, ChevronLeft, Plus, Share2, Copy, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import LZString from 'lz-string';
-import { extractScheduleFromImage, optimizeSchedule, Act, Vote } from './services/geminiService';
+import { extractScheduleFromImage, optimizeSchedule, Act, Vote, OptimizationStrategy } from './services/geminiService';
 import { cn } from './lib/utils';
 
 // --- Types ---
@@ -62,6 +62,9 @@ export default function App() {
   
   const [optimalActIds, setOptimalActIds] = useState<string[]>([]);
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [strategy, setStrategy] = useState<OptimizationStrategy>('default');
+  const [showStrategyDropdown, setShowStrategyDropdown] = useState(false);
+  const [showOnlyOptimal, setShowOnlyOptimal] = useState(false);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   
@@ -240,16 +243,18 @@ export default function App() {
     });
   };
 
-  const handleOptimize = async () => {
+  const handleOptimize = async (selectedStrategy?: OptimizationStrategy) => {
     if (!festival) return;
+    const finalStrategy = selectedStrategy || strategy;
     setIsOptimizing(true);
+    setShowStrategyDropdown(false);
     try {
       // Map votes to include color for optimization logic if needed
       const votesWithColor = festival.votes.map(v => {
         const user = festival.users.find(u => u.user_id === v.user_id);
         return { ...v, color: user?.color || '#000' };
       });
-      const result = await optimizeSchedule(festival.acts, votesWithColor);
+      const result = await optimizeSchedule(festival.acts, votesWithColor, finalStrategy);
       setOptimalActIds(result);
     } catch (err) {
       console.error(err);
@@ -275,8 +280,11 @@ export default function App() {
   const stages = Array.from(new Set(festival?.acts.map(a => a.stage) || [])) as string[];
   
   const getActsForDayAndStage = (day: string, stage: string) => {
-    return festival?.acts.filter(a => a.day === day && a.stage === stage)
-      .sort((a, b) => a.startTime.localeCompare(b.startTime)) || [];
+    let acts = festival?.acts.filter(a => a.day === day && a.stage === stage) || [];
+    if (showOnlyOptimal && optimalActIds.length > 0) {
+      acts = acts.filter(a => optimalActIds.includes(a.id));
+    }
+    return acts.sort((a, b) => a.startTime.localeCompare(b.startTime));
   };
 
   const getVotesForAct = (actId: string) => {
@@ -449,7 +457,7 @@ export default function App() {
 
       {/* Header */}
       <header className="sticky top-0 z-50 bg-[#E4E3E0]/80 backdrop-blur-md border-b border-[#141414]/10 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+        <div className="max-w-[90%] mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
             <h1 className="text-2xl font-serif italic">{festival.name}</h1>
             <div className="h-4 w-[1px] bg-[#141414]/20 hidden sm:block" />
@@ -470,18 +478,60 @@ export default function App() {
               {copied ? <Check size={14} className="text-emerald-500" /> : <Share2 size={14} />}
               <span className="hidden xs:inline">{copied ? 'Copied!' : 'Share'}</span>
             </button>
-            <button 
-              onClick={handleOptimize}
-              disabled={isOptimizing}
-              className="flex items-center gap-2 px-4 py-2 bg-[#141414] text-white rounded-full text-[10px] font-mono uppercase tracking-widest hover:bg-[#141414]/90 transition-all disabled:opacity-50"
-            >
-              {isOptimizing ? (
-                <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Sparkles size={14} />
-              )}
-              {optimalActIds.length > 0 ? 'Re-Optimize' : 'Optimize Run'}
-            </button>
+            <div className="relative">
+              <button 
+                onClick={() => setShowStrategyDropdown(!showStrategyDropdown)}
+                disabled={isOptimizing}
+                className="flex items-center gap-2 px-4 py-2 bg-[#141414] text-white rounded-full text-[10px] font-mono uppercase tracking-widest hover:bg-[#141414]/90 transition-all disabled:opacity-50"
+              >
+                {isOptimizing ? (
+                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Sparkles size={14} />
+                )}
+                {optimalActIds.length > 0 ? 'Re-Optimize' : 'Optimize Run'}
+              </button>
+
+              <AnimatePresence>
+                {showStrategyDropdown && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute right-0 mt-2 w-72 bg-white border border-[#141414]/10 rounded-2xl shadow-2xl overflow-hidden z-[100]"
+                  >
+                    <div className="p-2 space-y-1">
+                      {[
+                        { id: 'default', label: 'Default', desc: 'Balances volume of acts with group consensus.' },
+                        { id: 'quantity', label: 'Quantity', desc: 'Maximize total acts. Resolve overlaps by picking shorter sets.' },
+                        { id: 'consensus', label: 'Consensus', desc: 'Maximize acts with the highest group vote percentage.' },
+                        { id: 'variety', label: 'Variety', desc: 'Maximize genre range across the whole day.' }
+                      ].map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => {
+                            setStrategy(s.id as OptimizationStrategy);
+                            handleOptimize(s.id as OptimizationStrategy);
+                          }}
+                          className={cn(
+                            "w-full text-left p-3 rounded-xl transition-all group",
+                            strategy === s.id ? "bg-[#141414]/5" : "hover:bg-[#141414]/5"
+                          )}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-[10px] font-mono uppercase tracking-widest font-bold">{s.label}</span>
+                            {strategy === s.id && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                          </div>
+                          <p className="text-[9px] text-[#141414]/60 leading-relaxed font-sans uppercase tracking-tight">
+                            {s.desc}
+                          </p>
+                        </button>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
             <button 
               onClick={() => {
                 setFestival(null);
@@ -495,7 +545,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto p-6 space-y-8">
+      <main className="max-w-[90%] mx-auto p-6 space-y-8">
         <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-start gap-3">
           <Share2 className="text-amber-600 shrink-0 mt-0.5" size={16} />
           <p className="text-[10px] font-mono text-amber-800 uppercase leading-relaxed">
@@ -517,34 +567,51 @@ export default function App() {
           )}
         </div>
 
-        {/* Day Selector */}
-        <div className="flex items-center gap-4 overflow-x-auto pb-2 no-scrollbar">
-          <div className="flex gap-2">
-            {days.map(day => (
-              <button
-                key={day}
-                onClick={() => setSelectedDay(day)}
-                className={cn(
-                  "px-6 py-2 rounded-full text-xs font-mono uppercase tracking-widest transition-all border border-[#141414]/10 whitespace-nowrap",
-                  selectedDay === day ? "bg-[#141414] text-white" : "bg-white/50 hover:bg-white"
-                )}
-              >
-                {day}
-              </button>
-            ))}
-          </div>
-          
-          <label className="shrink-0 cursor-pointer group">
-            <div className="flex items-center gap-2 px-4 py-2 rounded-full border border-dashed border-[#141414]/20 hover:border-[#141414] transition-all bg-white/30">
-              <Plus size={14} className="text-[#141414]/40 group-hover:text-[#141414]" />
-              <span className="text-[10px] font-mono uppercase tracking-widest text-[#141414]/40 group-hover:text-[#141414]">Add Day</span>
+        {/* Day Selector & View Toggle */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4 overflow-x-auto pb-2 no-scrollbar flex-1">
+            <div className="flex gap-2">
+              {days.map(day => (
+                <button
+                  key={day}
+                  onClick={() => setSelectedDay(day)}
+                  className={cn(
+                    "px-6 py-2 rounded-full text-xs font-mono uppercase tracking-widest transition-all border border-[#141414]/10 whitespace-nowrap",
+                    selectedDay === day ? "bg-[#141414] text-white" : "bg-white/50 hover:bg-white"
+                  )}
+                >
+                  {day}
+                </button>
+              ))}
             </div>
-            <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={isProcessing} multiple />
-          </label>
+            
+            <label className="shrink-0 cursor-pointer group">
+              <div className="flex items-center gap-2 px-4 py-2 rounded-full border border-dashed border-[#141414]/20 hover:border-[#141414] transition-all bg-white/30">
+                <Plus size={14} className="text-[#141414]/40 group-hover:text-[#141414]" />
+                <span className="text-[10px] font-mono uppercase tracking-widest text-[#141414]/40 group-hover:text-[#141414]">Add Day</span>
+              </div>
+              <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={isProcessing} multiple />
+            </label>
+          </div>
+
+          {optimalActIds.length > 0 && (
+            <button 
+              onClick={() => setShowOnlyOptimal(!showOnlyOptimal)}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-mono uppercase tracking-widest transition-all border shrink-0",
+                showOnlyOptimal 
+                  ? "bg-emerald-500 text-white border-emerald-500" 
+                  : "bg-white border-[#141414]/10 text-[#141414]/60 hover:bg-[#141414]/5"
+              )}
+            >
+              <Sparkles size={14} />
+              <span>{showOnlyOptimal ? 'Showing Optimized Run' : 'Hide Unhighlighted Acts'}</span>
+            </button>
+          )}
         </div>
 
         {/* Schedule Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 items-start">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6 items-start">
           {stages.map(stage => (
             <div key={stage} className="space-y-4">
               <div className="flex items-center justify-between border-b border-[#141414] pb-2">
