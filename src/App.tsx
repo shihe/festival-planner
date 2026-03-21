@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Upload, Calendar, Users, Sparkles, Trash2, ChevronRight, ChevronLeft, Plus, Share2, Copy, Check, Palette } from 'lucide-react';
+import { Upload, Calendar, Users, Sparkles, Trash2, ChevronRight, ChevronLeft, Plus, Share2, Copy, Check, Palette, List, Grid } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import LZString from 'lz-string';
 import { extractScheduleFromImage, optimizeSchedule, Act, Vote, OptimizationStrategy } from './services/geminiService';
@@ -66,6 +66,7 @@ export default function App() {
   const [showStrategyDropdown, setShowStrategyDropdown] = useState(false);
   const [showOnlyOptimal, setShowOnlyOptimal] = useState(false);
   const [showGradients, setShowGradients] = useState(true);
+  const [viewMode, setViewMode] = useState<'grid' | 'timeline'>('grid');
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   
@@ -642,6 +643,22 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 bg-white rounded-full p-1 border border-[#141414]/10 shrink-0">
+              <button
+                onClick={() => setViewMode('grid')}
+                className={cn("p-1.5 rounded-full transition-all", viewMode === 'grid' ? "bg-[#141414] text-white" : "text-[#141414]/40 hover:text-[#141414]")}
+                title="Grid View"
+              >
+                <Grid size={14} />
+              </button>
+              <button
+                onClick={() => setViewMode('timeline')}
+                className={cn("p-1.5 rounded-full transition-all", viewMode === 'timeline' ? "bg-[#141414] text-white" : "text-[#141414]/40 hover:text-[#141414]")}
+                title="Schedule View"
+              >
+                <List size={14} />
+              </button>
+            </div>
             <button 
               onClick={() => setShowGradients(!showGradients)}
               className={cn(
@@ -672,6 +689,7 @@ export default function App() {
         </div>
 
         {/* Schedule Grid */}
+        {viewMode === 'grid' ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6 items-start">
           {stages.map(stage => (
             <div key={stage} className="space-y-4">
@@ -770,6 +788,105 @@ export default function App() {
             </div>
           ))}
         </div>
+        ) : (
+          <div className="max-w-2xl mx-auto space-y-4">
+            {optimalActIds.length === 0 ? (
+              <div className="text-center py-12 text-[#141414]/40 font-mono text-sm border border-dashed border-[#141414]/20 rounded-2xl">
+                No acts optimized yet. Run the AI optimizer to generate your schedule.
+              </div>
+            ) : (
+              festival?.acts
+                .filter(a => a.day === selectedDay && optimalActIds.includes(a.id))
+                .sort((a, b) => a.startTime.localeCompare(b.startTime))
+                .map(act => {
+                  const votes = getVotesForAct(act.id);
+                  const isOptimal = true;
+                  const hasVoted = votes.some(v => v.user_id === userId);
+
+                  return (
+                    <motion.div
+                      layout
+                      key={act.id}
+                      onClick={() => toggleVote(act.id)}
+                      className={cn(
+                        "group relative p-4 rounded-2xl border transition-all cursor-pointer",
+                        "shadow-xl scale-[1.02]",
+                        !showGradients ? "bg-[#141414] text-white border-[#141414]" : "text-[#141414] border-[#141414] border-2"
+                      )}
+                      style={getActBackgroundStyle(votes, true)}
+                    >
+                      <div className="absolute -top-2 -right-2 bg-emerald-500 text-white p-1 rounded-full shadow-lg">
+                        <Sparkles size={12} />
+                      </div>
+
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex flex-col">
+                          <span className={cn(
+                            "text-[10px] font-mono uppercase tracking-tighter",
+                            !showGradients ? "text-white/60" : "text-[#141414]/60"
+                          )}>
+                            {act.startTime} — {act.endTime}
+                          </span>
+                          <span className={cn(
+                            "text-xs font-serif italic mt-0.5",
+                            !showGradients ? "text-white/80" : "text-[#141414]/80"
+                          )}>
+                            {act.stage}
+                          </span>
+                        </div>
+                        <div className="flex -space-x-1">
+                          {votes.map((v, i) => {
+                            const user = getUserById(v.user_id);
+                            return (
+                              <div 
+                                key={i} 
+                                title={user?.name}
+                                className="w-2.5 h-2.5 rounded-full border border-white shadow-sm" 
+                                style={{ backgroundColor: user?.color || '#000' }} 
+                              />
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <h4 className="font-medium text-lg mb-1 leading-tight">{act.name}</h4>
+                      
+                      {act.genres && act.genres.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mb-1">
+                          {act.genres.map((genre, idx) => (
+                            <span 
+                              key={idx} 
+                              className={cn(
+                                "text-[8px] font-mono uppercase px-1.5 py-0.5 rounded-sm",
+                                !showGradients ? "bg-white/10 text-white/60" : "bg-[#141414]/5 text-[#141414]/60"
+                              )}
+                            >
+                              {genre}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      
+                      <div className="flex items-center justify-between mt-3">
+                        <div className="flex items-center gap-1">
+                          <Users size={10} className={!showGradients ? "text-white/40" : "text-[#141414]/40"} />
+                          <span className={cn("text-[10px] font-mono", !showGradients ? "text-white/40" : "text-[#141414]/60")}>
+                            {votes.length} Votes
+                          </span>
+                        </div>
+                        {hasVoted && (
+                          <div className="flex items-center gap-1">
+                            <span className={cn("text-[8px] font-mono uppercase", !showGradients ? "text-white/40" : "text-[#141414]/60")}>You</span>
+                            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: userColor }} />
+                          </div>
+                        )}
+                      </div>
+                    </motion.div>
+                  );
+                })
+            )}
+          </div>
+        )}
       </main>
 
       {/* Footer Info */}
