@@ -69,6 +69,7 @@ export default function App() {
   const [viewMode, setViewMode] = useState<'grid' | 'timeline'>('grid');
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
   
   useEffect(() => {
     if (!isProcessing) {
@@ -265,13 +266,28 @@ export default function App() {
     }
   };
 
-  const handleShare = () => {
+  const handleShare = async () => {
     if (!festival) return;
+    setIsSharing(true);
     const encoded = encodeState(festival);
-    const url = `${window.location.origin}${window.location.pathname}?s=${encoded}`;
-    navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    const longUrl = `${window.location.origin}${window.location.pathname}?s=${encoded}`;
+    
+    try {
+      const response = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(longUrl)}`);
+      if (response.ok) {
+        const shortUrl = await response.text();
+        navigator.clipboard.writeText(shortUrl);
+      } else {
+        navigator.clipboard.writeText(longUrl);
+      }
+    } catch (err) {
+      console.error('Failed to shorten URL:', err);
+      navigator.clipboard.writeText(longUrl);
+    } finally {
+      setIsSharing(false);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
     
     // Also update current URL to reflect state
     window.history.pushState({}, '', `?s=${encoded}`);
@@ -521,10 +537,17 @@ export default function App() {
           <div className="flex items-center gap-2 sm:gap-3">
             <button 
               onClick={handleShare}
-              className="flex items-center gap-2 px-3 py-2 bg-white border border-[#141414]/10 rounded-full text-[10px] font-mono uppercase tracking-widest hover:bg-[#141414]/5 transition-all"
+              disabled={isSharing}
+              className="flex items-center gap-2 px-3 py-2 bg-white border border-[#141414]/10 rounded-full text-[10px] font-mono uppercase tracking-widest hover:bg-[#141414]/5 transition-all disabled:opacity-50"
             >
-              {copied ? <Check size={14} className="text-emerald-500" /> : <Share2 size={14} />}
-              <span className="hidden xs:inline">{copied ? 'Copied!' : 'Share'}</span>
+              {isSharing ? (
+                <div className="w-3.5 h-3.5 border-2 border-[#141414] border-t-transparent rounded-full animate-spin" />
+              ) : copied ? (
+                <Check size={14} className="text-emerald-500" />
+              ) : (
+                <Share2 size={14} />
+              )}
+              <span className="hidden xs:inline">{isSharing ? 'Sharing...' : copied ? 'Copied!' : 'Share'}</span>
             </button>
             <div className="relative">
               <button 
