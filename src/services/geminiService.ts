@@ -19,7 +19,7 @@ export interface Vote {
 export const extractScheduleFromImage = async (base64Image: string): Promise<{ festivalName: string, acts: Act[] }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const model = ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-3.1-flash-lite-preview",
     contents: [
       {
         inlineData: {
@@ -82,7 +82,7 @@ export const optimizeSchedule = async (acts: Act[], votes: (Vote & { color: stri
   }
 
   const model = ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-3.1-flash-lite-preview",
     contents: `
       Given a list of music festival acts and group votes, generate an optimal schedule.
       ${strategyPrompt}
