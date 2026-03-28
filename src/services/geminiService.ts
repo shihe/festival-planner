@@ -72,13 +72,13 @@ export type OptimizationStrategy = 'default' | 'quantity' | 'consensus' | 'varie
 export const optimizeSchedule = async (acts: Act[], votes: (Vote & { color: string })[], strategy: OptimizationStrategy = 'default'): Promise<string[]> => {
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   
-  let strategyPrompt = "The goal is to maximize the number of acts the group can see together, prioritizing acts with more votes.";
+  let strategyPrompt = "First, prioritize acts that have received votes from the group. Then, maximize the number of acts the group can see together, prioritizing acts with more votes.";
   if (strategy === 'quantity') {
-    strategyPrompt = "Maximize the total number of acts that can be seen within the day. Resolve overlaps by picking shorter sets or more frequent transitions to fit as many unique artists as possible into the schedule.";
+    strategyPrompt = "First, prioritize acts that have received votes from the group. Then, maximize the total number of acts that can be seen within the day. Resolve overlaps by picking shorter sets or more frequent transitions to fit as many unique artists as possible into the schedule.";
   } else if (strategy === 'consensus') {
-    strategyPrompt = "Maximize seeing the acts with the most consensus (acts where the highest percentage of the group voted for them).";
+    strategyPrompt = "First, prioritize acts that have received votes from the group. Then, maximize seeing the acts with the most consensus (acts where the highest percentage of the group voted for them).";
   } else if (strategy === 'variety') {
-    strategyPrompt = "Maximize the acts that collectively create the most varied range in music genres. Use your knowledge of the artists to determine their genres.";
+    strategyPrompt = "First, prioritize acts that have received votes from the group. Then, maximize the acts that collectively create the most varied range in music genres. Use your knowledge of the artists to determine their genres.";
   }
 
   const model = ai.models.generateContent({
