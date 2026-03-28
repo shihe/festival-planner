@@ -273,12 +273,27 @@ export default function App() {
     const longUrl = `${window.location.origin}${window.location.pathname}?s=${encoded}`;
     
     try {
-      const response = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(longUrl)}`);
-      if (response.ok) {
-        const shortUrl = await response.text();
-        navigator.clipboard.writeText(shortUrl);
-      } else {
+      const apiKey = (import.meta as any).env.VITE_TINYURL_API_KEY;
+      if (!apiKey) {
+        console.warn('VITE_TINYURL_API_KEY is not set. Falling back to long URL.');
         navigator.clipboard.writeText(longUrl);
+      } else {
+        const response = await fetch('https://api.tinyurl.com/create', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ url: longUrl, domain: "tinyurl.com" })
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          navigator.clipboard.writeText(data.data.tiny_url);
+        } else {
+          console.warn('TinyURL API error:', await response.text());
+          navigator.clipboard.writeText(longUrl);
+        }
       }
     } catch (err) {
       console.error('Failed to shorten URL:', err);
