@@ -1,13 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import pg from "pg";
-
-const { Pool } = pg;
-
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+import { neon } from "@neondatabase/serverless";
 
 async function initDB() {
   if (!process.env.DATABASE_URL) {
@@ -15,13 +9,14 @@ async function initDB() {
     return;
   }
   try {
-    await pool.query(`
+    const sql = neon(process.env.DATABASE_URL);
+    await sql`
       CREATE TABLE IF NOT EXISTS festivals (
         id VARCHAR(255) PRIMARY KEY,
         data JSONB NOT NULL,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
-    `);
+    `;
     console.log("Database initialized");
   } catch (err) {
     console.error("Failed to initialize database:", err);
@@ -43,9 +38,10 @@ async function startServer() {
     const { id } = req.params;
     try {
       if (process.env.DATABASE_URL) {
-        const result = await pool.query("SELECT data FROM festivals WHERE id = $1", [id]);
-        if (result.rows.length > 0) {
-          res.json({ data: result.rows[0].data });
+        const sql = neon(process.env.DATABASE_URL);
+        const result = await sql`SELECT data FROM festivals WHERE id = ${id}`;
+        if (result.length > 0) {
+          res.json({ data: result[0].data });
         } else {
           res.status(404).json({ error: "Not found" });
         }
@@ -67,10 +63,13 @@ async function startServer() {
     const { data } = req.body;
     try {
       if (process.env.DATABASE_URL) {
-        await pool.query(
-          "INSERT INTO festivals (id, data) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET data = $2, updated_at = CURRENT_TIMESTAMP",
-          [id, JSON.stringify(data)]
-        );
+        const sql = neon(process.env.DATABASE_URL);
+        await sql`
+          INSERT INTO festivals (id, data) 
+          VALUES (${id}, ${JSON.stringify(data)}) 
+          ON CONFLICT (id) 
+          DO UPDATE SET data = ${JSON.stringify(data)}, updated_at = CURRENT_TIMESTAMP
+        `;
       } else {
         memoryStore.set(id, data);
       }
