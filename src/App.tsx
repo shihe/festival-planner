@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Upload, Calendar, Users, Sparkles, Trash2, ChevronRight, ChevronLeft, Plus, Share2, Copy, Check, Palette, List, Grid } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import LZString from 'lz-string';
 import { extractScheduleFromImage, optimizeSchedule, Act, Vote, OptimizationStrategy } from './services/geminiService';
 import { cn } from './lib/utils';
 
@@ -37,11 +36,6 @@ export default function App() {
   const [processingMessage, setProcessingMessage] = useState("EXTRACTING SCHEDULE...");
   const [progress, setProgress] = useState(0);
   const [userId, setUserId] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('s')) {
-      // Always fresh ID for shared links
-      return Math.random().toString(36).substring(7);
-    }
     const saved = localStorage.getItem('fest_user_id');
     if (saved) return saved;
     const id = Math.random().toString(36).substring(7);
@@ -49,16 +43,19 @@ export default function App() {
     return id;
   });
   const [userName, setUserName] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('s')) return ''; // Force name entry for shared links
     return localStorage.getItem('fest_user_name') || '';
   });
   const [userColor, setUserColor] = useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('s')) return COLORS[0]; // Reset color for shared links
     return localStorage.getItem('fest_user_color') || COLORS[0];
   });
   const [isJoining, setIsJoining] = useState(false);
+  const [isFetchingFestival, setIsFetchingFestival] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return !!params.get('id');
+  });
+  
+  const wsRef = useRef<WebSocket | null>(null);
+  const isRemoteUpdateRef = useRef(false);
   
   const [optimalActIds, setOptimalActIds] = useState<string[]>([]);
   const [isOptimizing, setIsOptimizing] = useState(false);
@@ -102,45 +99,100 @@ export default function App() {
     };
   }, [isProcessing]);
 
-  // --- State Encoding ---
-  const encodeState = (data: FestivalData) => {
-    try {
-      return LZString.compressToEncodedURIComponent(JSON.stringify(data));
-    } catch (e) {
-      console.error("Encoding failed", e);
-      return "";
-    }
-  };
+  // --- WebSocket Setup ---
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlId = urlParams.get('id');
+  const activeId = festival?.id || urlId;
 
-  const decodeState = (encoded: string): FestivalData | null => {
-    try {
-      const decompressed = LZString.decompressFromEncodedURIComponent(encoded);
-      if (!decompressed) return null;
-      return JSON.parse(decompressed);
-    } catch (e) {
-      console.error("Decoding failed", e);
-      return null;
-    }
-  };
-
-  // --- Initial Load ---
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const encodedState = params.get('s');
-    
-    if (encodedState) {
-      const decoded = decodeState(encodedState);
-      if (decoded) {
-        setFestival(decoded);
-        if (decoded.acts.length > 0) {
-          setSelectedDay(decoded.acts[0].day);
-        }
-        
-        // Always prompt to join when using a shared link
-        setIsJoining(true);
+    if (!activeId || wsRef.current) return;
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'join', festivalId: activeId }));
+      // If we just created a new festival locally, push it
+      if (festival && !urlId) {
+        ws.send(JSON.stringify({
+          type: 'update',
+          festivalId: activeId,
+          data: festival
+        }));
       }
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'init' || msg.type === 'update') {
+          const festivalData = msg.data;
+          
+          if (msg.type === 'init') {
+            setIsFetchingFestival(false);
+            const userExists = festivalData.users.some((u: any) => u.user_id === userId);
+            
+            if (!userExists && userName) {
+              // Auto-join if they have a name but aren't in the festival yet
+              festivalData.users.push({ user_id: userId, name: userName, color: userColor });
+              isRemoteUpdateRef.current = false; // Force broadcast
+            } else {
+              isRemoteUpdateRef.current = true;
+              if (!userExists && !userName) {
+                setIsJoining(true);
+              }
+            }
+          } else {
+            isRemoteUpdateRef.current = true;
+          }
+          
+          setFestival(festivalData);
+          if (festivalData.acts.length > 0) {
+            setSelectedDay(prev => prev || festivalData.acts[0].day);
+          }
+        } else if (msg.type === 'not_found') {
+          setIsFetchingFestival(false);
+          // Remove invalid ID from URL
+          window.history.pushState({}, '', window.location.pathname);
+        }
+      } catch (err) {
+        console.error('Failed to parse WS message', err);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log('WebSocket disconnected');
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
+    };
+
+    return () => {
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+      if (wsRef.current === ws) {
+        wsRef.current = null;
+      }
+    };
+  }, [activeId]);
+
+  // Broadcast local changes
+  useEffect(() => {
+    if (festival && wsRef.current?.readyState === WebSocket.OPEN) {
+      if (isRemoteUpdateRef.current) {
+        isRemoteUpdateRef.current = false;
+        return;
+      }
+      wsRef.current.send(JSON.stringify({
+        type: 'update',
+        festivalId: festival.id,
+        data: festival
+      }));
     }
-  }, []);
+  }, [festival]);
 
   const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,7 +253,9 @@ export default function App() {
             acts: [...prev.acts, ...filteredNewActs]
           };
         } else {
-          const festivalId = Math.random().toString(36).substring(7);
+          const urlParams = new URLSearchParams(window.location.search);
+          const urlId = urlParams.get('id');
+          const festivalId = urlId || Math.random().toString(36).substring(7);
           return {
             id: festivalId,
             name: detectedFestivalName || "My Festival",
@@ -269,8 +323,7 @@ export default function App() {
   const handleShare = async () => {
     if (!festival) return;
     setIsSharing(true);
-    const encoded = encodeState(festival);
-    const longUrl = `${window.location.origin}${window.location.pathname}?s=${encoded}`;
+    const longUrl = `${window.location.origin}${window.location.pathname}?id=${festival.id}`;
     
     try {
       const apiKey = (import.meta as any).env.VITE_TINYURL_API_KEY;
@@ -305,7 +358,7 @@ export default function App() {
     }
     
     // Also update current URL to reflect state
-    window.history.pushState({}, '', `?s=${encoded}`);
+    window.history.pushState({}, '', `?id=${festival.id}`);
   };
 
   // --- Helpers ---
@@ -422,16 +475,24 @@ export default function App() {
               <p className="text-[#141414]/60 uppercase tracking-widest text-xs font-mono">AI Festival Optimizer</p>
             </div>
 
-            <div className="relative group">
-              <label className="flex flex-col items-center justify-center w-full h-64 border-2 border-dashed border-[#141414]/20 rounded-3xl cursor-pointer hover:border-[#141414] transition-all bg-white/50 backdrop-blur-sm">
-                <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                  <Upload className="w-12 h-12 mb-4 text-[#141414]/40 group-hover:text-[#141414] transition-colors" />
-                  <p className="mb-2 text-lg font-medium text-[#141414]">Upload Schedule Image</p>
-                  <p className="text-xs text-[#141414]/40 font-mono">PNG, JPG or WEBP</p>
-                </div>
-                <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={isProcessing} multiple />
-              </label>
-            </div>
+            {isFetchingFestival ? (
+              <div className="flex flex-col items-center justify-center w-full h-64 border-2 border-dashed border-[#141414]/20 rounded-3xl bg-white/50 backdrop-blur-sm">
+                <div className="w-8 h-8 border-2 border-[#141414] border-t-transparent rounded-full animate-spin mb-4" />
+                <p className="text-sm font-medium text-[#141414]">Loading Schedule...</p>
+                <p className="text-xs text-[#141414]/40 font-mono mt-1">Syncing with group</p>
+              </div>
+            ) : (
+              <div className="relative group">
+                <label className="flex flex-col items-center justify-center w-full h-64 border-2 border-dashed border-[#141414]/20 rounded-3xl cursor-pointer hover:border-[#141414] transition-all bg-white/50 backdrop-blur-sm">
+                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                    <Upload className="w-12 h-12 mb-4 text-[#141414]/40 group-hover:text-[#141414] transition-colors" />
+                    <p className="mb-2 text-lg font-medium text-[#141414]">Upload Schedule Image</p>
+                    <p className="text-xs text-[#141414]/40 font-mono">PNG, JPG or WEBP</p>
+                  </div>
+                  <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={isProcessing} multiple />
+                </label>
+              </div>
+            )}
 
             <div className="grid grid-cols-3 gap-4">
               {[1, 2, 3].map(i => (
@@ -632,12 +693,6 @@ export default function App() {
       </header>
 
       <main className="max-w-[90%] mx-auto p-6 space-y-8">
-        <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-start gap-3">
-          <Share2 className="text-amber-600 shrink-0 mt-0.5" size={16} />
-          <p className="text-[10px] font-mono text-amber-800 uppercase leading-relaxed">
-            Note: This app is serverless. To share your votes with others, you must click <span className="font-bold">SHARE</span> to generate a new link after making changes.
-          </p>
-        </div>
         {/* User Legend */}
         <div className="flex flex-wrap gap-4 p-4 bg-white/30 rounded-2xl border border-[#141414]/5">
           <span className="text-[10px] font-mono uppercase opacity-40 w-full mb-1">Group Members</span>
