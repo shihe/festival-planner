@@ -54,7 +54,6 @@ export default function App() {
     return !!params.get('id');
   });
   
-  const wsRef = useRef<WebSocket | null>(null);
   const isRemoteUpdateRef = useRef(false);
   
   const [optimalActIds, setOptimalActIds] = useState<string[]>([]);
@@ -99,98 +98,91 @@ export default function App() {
     };
   }, [isProcessing]);
 
-  // --- WebSocket Setup ---
+  // --- HTTP Polling Setup ---
   const urlParams = new URLSearchParams(window.location.search);
   const urlId = urlParams.get('id');
   const activeId = festival?.id || urlId;
 
-  useEffect(() => {
-    if (!activeId || wsRef.current) return;
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'join', festivalId: activeId }));
-      // If we just created a new festival locally, push it
-      if (festival && !urlId) {
-        ws.send(JSON.stringify({
-          type: 'update',
-          festivalId: activeId,
-          data: festival
-        }));
-      }
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'init' || msg.type === 'update') {
-          const festivalData = msg.data;
+  const fetchFestival = async (id: string, isInit = false) => {
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || '';
+      const res = await fetch(`${apiUrl}/api/festivals/${id}`);
+      if (res.ok) {
+        const { data } = await res.json();
+        const festivalData = data;
+        
+        if (isInit) {
+          setIsFetchingFestival(false);
+          const userExists = festivalData.users.some((u: any) => u.user_id === userId);
           
-          if (msg.type === 'init') {
-            setIsFetchingFestival(false);
-            const userExists = festivalData.users.some((u: any) => u.user_id === userId);
-            
-            if (!userExists && userName) {
-              // Auto-join if they have a name but aren't in the festival yet
-              festivalData.users.push({ user_id: userId, name: userName, color: userColor });
-              isRemoteUpdateRef.current = false; // Force broadcast
-            } else {
-              isRemoteUpdateRef.current = true;
-              if (!userExists && !userName) {
-                setIsJoining(true);
-              }
-            }
+          if (!userExists && userName) {
+            // Auto-join if they have a name but aren't in the festival yet
+            festivalData.users.push({ user_id: userId, name: userName, color: userColor });
+            isRemoteUpdateRef.current = false; // Force broadcast
+            updateFestival(id, festivalData);
           } else {
             isRemoteUpdateRef.current = true;
+            if (!userExists && !userName) {
+              setIsJoining(true);
+            }
           }
-          
-          setFestival(festivalData);
-          if (festivalData.acts.length > 0) {
-            setSelectedDay(prev => prev || festivalData.acts[0].day);
-          }
-        } else if (msg.type === 'not_found') {
+        } else {
+          isRemoteUpdateRef.current = true;
+        }
+        
+        setFestival(festivalData);
+        if (festivalData.acts.length > 0) {
+          setSelectedDay(prev => prev || festivalData.acts[0].day);
+        }
+      } else if (res.status === 404) {
+        if (isInit) {
           setIsFetchingFestival(false);
-          // Remove invalid ID from URL
           window.history.pushState({}, '', window.location.pathname);
         }
-      } catch (err) {
-        console.error('Failed to parse WS message', err);
       }
-    };
+    } catch (err) {
+      console.error('Failed to fetch festival', err);
+      if (isInit) setIsFetchingFestival(false);
+    }
+  };
 
-    ws.onclose = () => {
-      console.log('WebSocket disconnected');
-      if (wsRef.current === ws) {
-        wsRef.current = null;
-      }
-    };
+  const updateFestival = async (id: string, data: any) => {
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || '';
+      await fetch(`${apiUrl}/api/festivals/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data })
+      });
+    } catch (err) {
+      console.error('Failed to update festival', err);
+    }
+  };
 
-    return () => {
-      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
-        ws.close();
-      }
-      if (wsRef.current === ws) {
-        wsRef.current = null;
-      }
-    };
+  useEffect(() => {
+    if (!activeId) return;
+
+    // Initial fetch if loading from URL
+    if (urlId && !festival) {
+      fetchFestival(activeId, true);
+    }
+
+    // Poll every 3 seconds
+    const interval = setInterval(() => {
+      fetchFestival(activeId, false);
+    }, 3000);
+
+    return () => clearInterval(interval);
   }, [activeId]);
 
   // Broadcast local changes
   useEffect(() => {
-    if (festival && wsRef.current?.readyState === WebSocket.OPEN) {
+    if (festival) {
       if (isRemoteUpdateRef.current) {
         isRemoteUpdateRef.current = false;
         return;
       }
-      wsRef.current.send(JSON.stringify({
-        type: 'update',
-        festivalId: festival.id,
-        data: festival
-      }));
+      updateFestival(festival.id, festival);
     }
   }, [festival]);
 
