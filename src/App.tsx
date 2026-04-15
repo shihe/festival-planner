@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Upload, Calendar, Users, Sparkles, Trash2, ChevronRight, ChevronLeft, Plus, Share2, Copy, Check, Palette, List, Grid } from 'lucide-react';
+import { Upload, Calendar, Users, Sparkles, Trash2, ChevronRight, ChevronLeft, Plus, Share2, Copy, Check, Palette, List, Grid, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { extractScheduleFromImage, optimizeSchedule, Act, Vote, OptimizationStrategy } from './services/geminiService';
 import { cn } from './lib/utils';
@@ -62,6 +62,7 @@ export default function App() {
   const [showStrategyDropdown, setShowStrategyDropdown] = useState(false);
   const [showOnlyOptimal, setShowOnlyOptimal] = useState(false);
   const [showGradients, setShowGradients] = useState(true);
+  const [alignByTime, setAlignByTime] = useState<'off' | 'asc' | 'desc'>('off');
   const [viewMode, setViewMode] = useState<'grid' | 'timeline'>('grid');
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -386,7 +387,10 @@ export default function App() {
     if (showOnlyOptimal && optimalActIds.length > 0) {
       acts = acts.filter(a => optimalActIds.includes(a.id));
     }
-    return acts.sort((a, b) => a.startTime.localeCompare(b.startTime));
+    return acts.sort((a, b) => {
+      const cmp = a.startTime.localeCompare(b.startTime);
+      return alignByTime === 'desc' ? -cmp : cmp;
+    });
   };
 
   const getVotesForAct = (actId: string) => {
@@ -417,6 +421,105 @@ export default function App() {
 
   const getUserById = (id: string) => {
     return festival?.users.find(u => u.user_id === id);
+  };
+
+  const timeSlots = useMemo(() => {
+    if (!festival || !selectedDay) return [];
+    let dayActs = festival.acts.filter(a => a.day === selectedDay);
+    if (showOnlyOptimal && optimalActIds.length > 0) {
+      dayActs = dayActs.filter(a => optimalActIds.includes(a.id));
+    }
+    // Extract unique hours
+    return Array.from(new Set(dayActs.map(a => a.startTime.split(':')[0]))).sort((a, b) => {
+      const cmp = (a as string).localeCompare(b as string);
+      return alignByTime === 'desc' ? -cmp : cmp;
+    });
+  }, [festival, selectedDay, showOnlyOptimal, optimalActIds, alignByTime]);
+
+  const renderActCard = (act: Act) => {
+    const votes = getVotesForAct(act.id);
+    const isOptimal = optimalActIds.includes(act.id);
+    const hasVoted = votes.some(v => v.user_id === userId);
+
+    return (
+      <motion.div
+        layout
+        key={act.id}
+        onClick={() => toggleVote(act.id)}
+        className={cn(
+          "group relative p-4 rounded-2xl border transition-all cursor-pointer h-full flex flex-col",
+          isOptimal ? "shadow-xl scale-[1.02]" : "",
+          !showGradients && isOptimal ? "bg-[#141414] text-white border-[#141414]" : "",
+          !showGradients && !isOptimal ? "bg-white border-[#141414]/5 hover:border-[#141414]/20" : "",
+          showGradients ? "text-[#141414]" : "",
+          showGradients && isOptimal ? "border-[#141414] border-2" : "",
+          showGradients && !isOptimal ? "border-[#141414]/5 hover:border-[#141414]/20" : "",
+          showGradients && votes.length === 0 ? "bg-white" : ""
+        )}
+        style={getActBackgroundStyle(votes, isOptimal)}
+      >
+        {isOptimal && (
+          <div className="absolute -top-2 -right-2 bg-emerald-500 text-white p-1 rounded-full shadow-lg">
+            <Sparkles size={12} />
+          </div>
+        )}
+
+        <div className="flex justify-between items-start mb-2">
+          <span className={cn(
+            "text-[10px] font-mono uppercase tracking-tighter",
+            (!showGradients && isOptimal) ? "text-white/60" : "text-[#141414]/60"
+          )}>
+            {act.startTime} — {act.endTime}
+          </span>
+          <div className="flex -space-x-1">
+            {votes.map((v, i) => {
+              const user = getUserById(v.user_id);
+              return (
+                <div 
+                  key={i} 
+                  title={user?.name}
+                  className="w-2.5 h-2.5 rounded-full border border-white shadow-sm" 
+                  style={{ backgroundColor: user?.color || '#000' }} 
+                />
+              );
+            })}
+          </div>
+        </div>
+
+        <h4 className="font-medium text-sm mb-1 leading-tight flex-1">{act.name}</h4>
+        
+        {act.genres && act.genres.length > 0 && (
+          <div className="flex flex-wrap gap-1 mb-1 mt-2">
+            {act.genres.map((genre, idx) => (
+              <span 
+                key={idx} 
+                className={cn(
+                  "text-[8px] font-mono uppercase px-1.5 py-0.5 rounded-sm",
+                  (!showGradients && isOptimal) ? "bg-white/10 text-white/60" : "bg-[#141414]/5 text-[#141414]/60"
+                )}
+              >
+                {genre}
+              </span>
+            ))}
+          </div>
+        )}
+        
+        <div className="flex items-center justify-between mt-3">
+          <div className="flex items-center gap-1">
+            <Users size={10} className={(!showGradients && isOptimal) ? "text-white/40" : "text-[#141414]/40"} />
+            <span className={cn("text-[10px] font-mono", (!showGradients && isOptimal) ? "text-white/40" : "text-[#141414]/60")}>
+              {votes.length} Votes
+            </span>
+          </div>
+          {hasVoted && (
+            <div className="flex items-center gap-1">
+              <span className={cn("text-[8px] font-mono uppercase", (!showGradients && isOptimal) ? "text-white/40" : "text-[#141414]/60")}>You</span>
+              <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: userColor }} />
+            </div>
+          )}
+        </div>
+      </motion.div>
+    );
   };
 
   // --- Render ---
@@ -756,6 +859,24 @@ export default function App() {
               <Palette size={14} />
               <span className="hidden sm:inline">{showGradients ? 'Gradients On' : 'Gradients Off'}</span>
             </button>
+            <button 
+              onClick={() => {
+                if (alignByTime === 'off') setAlignByTime('asc');
+                else if (alignByTime === 'asc') setAlignByTime('desc');
+                else setAlignByTime('off');
+              }}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-mono uppercase tracking-widest transition-all border shrink-0",
+                alignByTime !== 'off' 
+                  ? "bg-[#141414] text-white border-[#141414]" 
+                  : "bg-white border-[#141414]/10 text-[#141414]/60 hover:bg-[#141414]/5"
+              )}
+            >
+              <Clock size={14} />
+              <span className="hidden sm:inline">
+                {alignByTime === 'off' ? 'Align by Time' : alignByTime === 'asc' ? 'Time Aligned (Asc)' : 'Time Aligned (Desc)'}
+              </span>
+            </button>
             {optimalActIds.length > 0 && (
               <button 
                 onClick={() => setShowOnlyOptimal(!showOnlyOptimal)}
@@ -775,104 +896,46 @@ export default function App() {
 
         {/* Schedule Grid */}
         {viewMode === 'grid' ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-6 items-start">
-          {stages.map(stage => (
-            <div key={stage} className="space-y-4">
-              <div className="flex items-center justify-between border-b border-[#141414] pb-2">
-                <h3 className="font-serif italic text-lg truncate pr-2">{stage}</h3>
-                <span className="text-[10px] font-mono opacity-40 uppercase shrink-0">Stage</span>
-              </div>
-              
-              <div className="space-y-3">
-                {getActsForDayAndStage(selectedDay!, stage).map(act => {
-                  const votes = getVotesForAct(act.id);
-                  const isOptimal = optimalActIds.includes(act.id);
-                  const hasVoted = votes.some(v => v.user_id === userId);
+          alignByTime !== 'off' ? (
+            <div className="grid gap-x-6 gap-y-4 overflow-x-auto pb-8" style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(160px, 1fr))` }}>
+              {/* Headers */}
+              {stages.map(stage => (
+                <div key={`header-${stage}`} className="border-b border-[#141414] pb-2 sticky top-0 bg-[#E4E3E0] z-10 flex items-center justify-between">
+                  <h3 className="font-serif italic text-lg truncate pr-2">{stage}</h3>
+                  <span className="text-[10px] font-mono opacity-40 uppercase shrink-0">Stage</span>
+                </div>
+              ))}
 
-                  return (
-                    <motion.div
-                      layout
-                      key={act.id}
-                      onClick={() => toggleVote(act.id)}
-                      className={cn(
-                        "group relative p-4 rounded-2xl border transition-all cursor-pointer",
-                        isOptimal ? "shadow-xl scale-[1.02]" : "",
-                        !showGradients && isOptimal ? "bg-[#141414] text-white border-[#141414]" : "",
-                        !showGradients && !isOptimal ? "bg-white border-[#141414]/5 hover:border-[#141414]/20" : "",
-                        showGradients ? "text-[#141414]" : "",
-                        showGradients && isOptimal ? "border-[#141414] border-2" : "",
-                        showGradients && !isOptimal ? "border-[#141414]/5 hover:border-[#141414]/20" : "",
-                        showGradients && votes.length === 0 ? "bg-white" : ""
-                      )}
-                      style={getActBackgroundStyle(votes, isOptimal)}
-                    >
-                      {isOptimal && (
-                        <div className="absolute -top-2 -right-2 bg-emerald-500 text-white p-1 rounded-full shadow-lg">
-                          <Sparkles size={12} />
-                        </div>
-                      )}
-
-                      <div className="flex justify-between items-start mb-2">
-                        <span className={cn(
-                          "text-[10px] font-mono uppercase tracking-tighter",
-                          (!showGradients && isOptimal) ? "text-white/60" : "text-[#141414]/60"
-                        )}>
-                          {act.startTime} — {act.endTime}
-                        </span>
-                        <div className="flex -space-x-1">
-                          {votes.map((v, i) => {
-                            const user = getUserById(v.user_id);
-                            return (
-                              <div 
-                                key={i} 
-                                title={user?.name}
-                                className="w-2.5 h-2.5 rounded-full border border-white shadow-sm" 
-                                style={{ backgroundColor: user?.color || '#000' }} 
-                              />
-                            );
-                          })}
-                        </div>
+              {/* Rows */}
+              {timeSlots.map(time => (
+                <React.Fragment key={time}>
+                  {stages.map(stage => {
+                    const actsAtTime = getActsForDayAndStage(selectedDay!, stage).filter(a => a.startTime.split(':')[0] === time);
+                    return (
+                      <div key={`${time}-${stage}`} className="flex flex-col gap-3">
+                        {actsAtTime.map(act => renderActCard(act))}
                       </div>
-
-                      <h4 className="font-medium text-sm mb-1 leading-tight">{act.name}</h4>
-                      
-                      {act.genres && act.genres.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mb-1">
-                          {act.genres.map((genre, idx) => (
-                            <span 
-                              key={idx} 
-                              className={cn(
-                                "text-[8px] font-mono uppercase px-1.5 py-0.5 rounded-sm",
-                                (!showGradients && isOptimal) ? "bg-white/10 text-white/60" : "bg-[#141414]/5 text-[#141414]/60"
-                              )}
-                            >
-                              {genre}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      
-                      <div className="flex items-center justify-between mt-3">
-                        <div className="flex items-center gap-1">
-                          <Users size={10} className={(!showGradients && isOptimal) ? "text-white/40" : "text-[#141414]/40"} />
-                          <span className={cn("text-[10px] font-mono", (!showGradients && isOptimal) ? "text-white/40" : "text-[#141414]/60")}>
-                            {votes.length} Votes
-                          </span>
-                        </div>
-                        {hasVoted && (
-                          <div className="flex items-center gap-1">
-                            <span className={cn("text-[8px] font-mono uppercase", (!showGradients && isOptimal) ? "text-white/40" : "text-[#141414]/60")}>You</span>
-                            <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: userColor }} />
-                          </div>
-                        )}
-                      </div>
-                    </motion.div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </React.Fragment>
+              ))}
             </div>
-          ))}
-        </div>
+          ) : (
+            <div className="flex overflow-x-auto snap-x gap-6 pb-8">
+              {stages.map(stage => (
+                <div key={stage} className="min-w-[160px] w-[160px] shrink-0 space-y-4">
+                  <div className="flex items-center justify-between border-b border-[#141414] pb-2 sticky top-0 bg-[#E4E3E0] z-10">
+                    <h3 className="font-serif italic text-lg truncate pr-2">{stage}</h3>
+                    <span className="text-[10px] font-mono opacity-40 uppercase shrink-0">Stage</span>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    {getActsForDayAndStage(selectedDay!, stage).map(act => renderActCard(act))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
         ) : (
           <div className="max-w-2xl mx-auto space-y-4">
             {optimalActIds.length === 0 ? (
