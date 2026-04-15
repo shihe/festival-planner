@@ -28,6 +28,14 @@ const COLORS = [
   '#ec4899', // pink
   '#06b6d4', // cyan
   '#f97316', // orange
+  '#84cc16', // lime
+  '#14b8a6', // teal
+  '#6366f1', // indigo
+  '#d946ef', // fuchsia
+  '#f43f5e', // rose
+  '#eab308', // yellow
+  '#0ea5e9', // sky
+  '#a855f7', // purple
 ];
 
 export default function App() {
@@ -204,6 +212,27 @@ export default function App() {
     });
     
     setIsJoining(false);
+  };
+
+  const handleLeaveGroup = () => {
+    if (!festival) return;
+    
+    // Clear local storage
+    localStorage.removeItem('fest_user_name');
+    localStorage.removeItem('fest_user_color');
+    setUserName('');
+    
+    isRemoteUpdateRef.current = false; // Force broadcast
+    
+    // Update festival state
+    setFestival(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        users: prev.users.filter(u => u.user_id !== userId),
+        votes: prev.votes.filter(v => v.user_id !== userId)
+      };
+    });
   };
 
   // --- Handlers ---
@@ -625,8 +654,18 @@ export default function App() {
             <motion.div 
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="bg-white p-8 rounded-[32px] shadow-2xl max-w-sm w-full space-y-8 border border-[#141414]/5"
+              className="bg-white p-8 rounded-[32px] shadow-2xl max-w-sm w-full space-y-8 border border-[#141414]/5 relative"
             >
+              {festival && (
+                <button 
+                  onClick={() => setIsJoining(false)}
+                  className="absolute top-6 right-6 p-2 hover:bg-[#141414]/5 rounded-full transition-colors"
+                >
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M13 1L1 13M1 1L13 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+              )}
               <div className="text-center space-y-2">
                 <h2 className="text-3xl font-serif italic">Join the Group</h2>
                 <p className="text-[10px] font-mono uppercase opacity-40">Set your profile to start voting</p>
@@ -650,7 +689,7 @@ export default function App() {
                   <label className="text-[10px] font-mono uppercase opacity-40 ml-1">Pick a Color</label>
                   <div className="grid grid-cols-4 gap-3">
                     {COLORS.map(color => {
-                      const isTaken = festival?.users.some(u => u.color === color);
+                      const isTaken = festival?.users.some(u => u.color === color && u.user_id !== userId);
                       return (
                         <button
                           key={color}
@@ -673,17 +712,29 @@ export default function App() {
                       );
                     })}
                   </div>
-                  {festival?.users.some(u => u.color === userColor) && (
+                  {festival?.users.some(u => u.color === userColor && u.user_id !== userId) && (
                     <p className="text-[8px] font-mono text-red-500 uppercase mt-1">This color is already taken!</p>
                   )}
                 </div>
 
-                <button 
-                  type="submit"
-                  className="w-full py-4 bg-[#141414] text-white rounded-2xl font-mono uppercase tracking-widest text-xs hover:bg-[#141414]/90 transition-all"
-                >
-                  Start Syncing
-                </button>
+                <div className="flex flex-col gap-3">
+                  <button 
+                    type="submit"
+                    className="w-full py-4 bg-[#141414] text-white rounded-2xl font-mono uppercase tracking-widest text-xs hover:bg-[#141414]/90 transition-all"
+                  >
+                    Start Syncing
+                  </button>
+                  
+                  {festival?.users.some(u => u.user_id === userId) && (
+                    <button 
+                      type="button"
+                      onClick={handleLeaveGroup}
+                      className="w-full py-3 bg-red-50 text-red-500 rounded-2xl font-mono uppercase tracking-widest text-xs hover:bg-red-100 transition-all border border-red-100"
+                    >
+                      Remove Myself
+                    </button>
+                  )}
+                </div>
               </form>
             </motion.div>
           </motion.div>
@@ -923,7 +974,7 @@ export default function App() {
           ) : (
             <div className="flex overflow-x-auto snap-x gap-6 pb-8">
               {stages.map(stage => (
-                <div key={stage} className="min-w-[160px] w-[160px] shrink-0 space-y-4">
+                <div key={stage} className="min-w-[160px] flex-1 shrink-0 space-y-4">
                   <div className="flex items-center justify-between border-b border-[#141414] pb-2 sticky top-0 bg-[#E4E3E0] z-10">
                     <h3 className="font-serif italic text-lg truncate pr-2">{stage}</h3>
                     <span className="text-[10px] font-mono opacity-40 uppercase shrink-0">Stage</span>
